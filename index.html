@@ -1,0 +1,218 @@
+<!DOCTYPE html><!-- Copyright (c) 2021 YA-androidapp(https://github.com/YA-androidapp) All rights reserved. -->
+
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>three-vrm example</title>
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>
+        body {
+            background-color: white;
+            margin: 0;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        canvas#jeelizFaceExpressionsCanvas {
+            z-index: 20;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            max-height: 25vh;
+            transform: rotateY(180deg);
+            /* mirror video */
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id='jeelizFaceExpressionsCanvas'></canvas>
+
+    <script src="https://unpkg.com/three@0.133.0/build/three.js"></script>
+    <script src="https://unpkg.com/three@0.133.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://unpkg.com/three@0.133.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script src="https://pixiv.github.io/three-vrm/lib/three-vrm.js"></script>
+
+    <!-- face -->
+    <script src="js/dist/jeelizFaceExpressions.js"></script>
+
+    <script>
+        // renderer
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // camera
+        const camera = new THREE.PerspectiveCamera(30.0, window.innerWidth / window.innerHeight, 0.1, 20.0);
+        camera.position.set(0.0, 1.0, 5.0);
+
+        // camera controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.screenSpacePanning = true;
+        controls.target.set(0.0, 1.0, 0.0);
+        controls.update();
+
+        // scene
+        const scene = new THREE.Scene();
+
+        // light
+        const light = new THREE.DirectionalLight(0xffffff);
+        light.position.set(1.0, 1.0, 1.0).normalize();
+        scene.add(light);
+
+        // face
+        JEELIZFACEEXPRESSIONS.init({
+            canvasThreeId: 'webojiCanvas',
+            canvasId: 'jeelizFaceExpressionsCanvas',
+            NNCpath: 'js/dist/'
+        });
+        let head;
+        let neck;
+        let spine;
+
+        // gltf and vrm
+        let currentVrm = undefined;
+        const loader = new THREE.GLTFLoader();
+
+        function load(url) {
+            loader.crossOrigin = 'anonymous';
+            loader.load(
+                url,
+                (gltf) => {
+                    THREE.VRMUtils.removeUnnecessaryJoints(gltf.scene);
+
+                    THREE.VRM.from(gltf).then((vrm) => {
+
+                        if (currentVrm) {
+                            scene.remove(currentVrm.scene);
+                            currentVrm.dispose();
+                        }
+
+                        currentVrm = vrm;
+                        scene.add(vrm.scene);
+
+                        vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.Hips).rotation.y = Math.PI;
+
+                        head = vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.Head)
+                        neck = vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.Neck)
+                        spine = vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.Spine)
+                        const leftUpperArm = vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.LeftUpperArm)
+                        const rightUpperArm = vrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.RightUpperArm)
+                        leftUpperArm.rotation.z = Math.PI * 2 / 5
+                        rightUpperArm.rotation.z = -Math.PI * 2 / 5
+                        blendShapeProxy = vrm.blendShapeProxy
+
+                        console.log(vrm);
+                    });
+
+                },
+
+                (progress) => console.log('Loading model...', 100.0 * (progress.loaded / progress.total), '%'),
+
+                (error) => console.error(error)
+
+            );
+
+        }
+
+        load('./vrm/bosa.vrm');
+
+        const updateFaceRotation = (faceRotaion) => {
+            const headW = 0.8
+            const neckW = 0.2
+            const spineW = 0.1
+
+            head.rotation.x = faceRotaion[0] * headW * -1
+            head.rotation.y = faceRotaion[1] * headW
+            head.rotation.z = faceRotaion[2] * headW * -1
+
+            neck.rotation.x = faceRotaion[0] * neckW * -1
+            neck.rotation.y = faceRotaion[1] * neckW
+            neck.rotation.z = faceRotaion[2] * neckW * -1
+
+            spine.rotation.x = faceRotaion[0] * spineW * -1
+            spine.rotation.y = faceRotaion[1] * spineW
+            spine.rotation.z = faceRotaion[2] * spineW * -1
+        }
+
+        const updateFaceExpression = (faceExpression) => {
+            console.log('faceExpression', faceExpression);
+
+            let joy = Math.round(Math.max(faceExpression[0], faceExpression[1]) * 3) / 3;
+            blendShapeProxy.setValue(THREE.VRMSchema.BlendShapePresetName.Joy, joy);
+
+            let s = Math.sin(Math.PI * clock.elapsedTime) * 20;
+            blendShapeProxy.setValue(THREE.VRMSchema.BlendShapePresetName.Blink, faceExpression[8]);
+            blendShapeProxy.setValue(THREE.VRMSchema.BlendShapePresetName.Blink, faceExpression[9]);
+
+            blendShapeProxy.setValue(THREE.VRMSchema.BlendShapePresetName.A, faceExpression[6]);
+
+            blendShapeProxy.update();
+        }
+
+        const gridHelper = new THREE.GridHelper(10, 10);
+        scene.add(gridHelper);
+
+        const axesHelper = new THREE.AxesHelper(5);
+        scene.add(axesHelper);
+
+        const clock = new THREE.Clock();
+        clock.start();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (currentVrm) {
+                if (JEELIZFACEEXPRESSIONS.ready && JEELIZFACEEXPRESSIONS.is_detected()) {
+                    const faceRotaion = JEELIZFACEEXPRESSIONS.get_rotationStabilized()
+                    updateFaceRotation(faceRotaion)
+
+                    const faceExpression = JEELIZFACEEXPRESSIONS.get_morphTargetInfluencesStabilized()
+                    updateFaceExpression(faceExpression)
+                }
+
+                // tweak bones
+                // const s = 0.25 * Math.PI * Math.sin(Math.PI * clock.elapsedTime);
+                // currentVrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.Neck).rotation.y = s;
+                // currentVrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.LeftUpperArm).rotation.z = s;
+                // currentVrm.humanoid.getBoneNode(THREE.VRMSchema.HumanoidBoneName.RightUpperArm).rotation.x = s;
+
+                currentVrm.update(clock.getDelta());
+            }
+            renderer.render(scene, camera);
+
+        }
+
+        animate();
+
+        window.addEventListener('dragover', function (event) {
+            event.preventDefault();
+        });
+
+        window.addEventListener('drop', function (event) {
+            event.preventDefault();
+
+            const files = event.dataTransfer.files;
+            if (!files) {
+                return;
+            }
+
+            const file = files[0];
+            if (!file) {
+                return;
+            }
+
+            const blob = new Blob([file], { type: "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            load(url);
+        });
+    </script>
+</body>
+
+</html>
